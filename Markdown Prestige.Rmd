@@ -1,0 +1,525 @@
+---
+title: "Prestige Dataset"
+author: "P.Weber, S. Matter J.Peter, R.Pircher, L. Schaffluetzel"
+date: "May 23, 2019"
+output:
+  pdf_document: 
+    latex_engine: xelatex
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Linear Regression - Predicting Occupational Prestige for Human Resources & Career Planning
+
+## Description of the Dataset & Business Understanding
+
+This data set contains an analysis of different occupations, which were obtained from Fox, J. and Weisberg, S. (2011) An R Companion to Applied Regression, Second Edition.
+The Prestige data frame has 102 rows and 6 columns where each observation represents an occupation. The columns relate to predictors such as average years, percentage of woman in the occupation, prestige of the occupation etc.
+
+Occupational prestige or also known as job prestige is a way for sociologists to determine the relative social class that people have. This basically refers to the consensual nature of rating a job based on the belief of its worthiness.
+Transferring this basic idea into our vast and fast shifting business society we see more and more people not only relying on their judgment and instincts, but proving their hypothesis by using KPIs.
+Prestige scores are used by head-hunters, recruiters in HR to rank business schools, banking firms and consulting companies to use it as a criterion to hire or not. 
+However, this dataset does not score companies and schools or universities, but general occupation classes. 
+
+## Attributes 
+
+- education: Average education of occupational incumbents, years in 1971.
+- women: Percentage verage education of occupational incumbents, years in 1971.
+- income: Average iof incumbents who are woman.
+- prestige: Pineo-Porter prestige score for occupation, from a social survey conducted in the mid 1960s.
+- census: Canadian Census occupational code. 
+- type: Type of occupation. A factor with levels. (note: out of order) bc: Blue Collar;prof, Professional, Managerial and Technical; wc, White Collar. 
+
+# Environment Installation
+
+In this section we are going to instal all relevant libraries. This task can be skipped if you have already installed the Packages.
+
+```{r}
+#install.packages('caTools') #Create Training and Testing dataset
+#install.packages('dplyr') #For Data Manipulation
+#install.packages('ggplot2') # for some amazing looking graphs
+#install.packages('caret') # for confusion matrix
+#install.packages('corrplot') #Correlation Plot
+#install.packages('car') # This is the library containing the dataset
+#install.packages('randomForest') # for RandomForest Alogrithm
+#install.packages('cowplot') #to use plot_grid
+#install.packages('gridExtra') #plot for cooks distance 
+```
+
+The next step is to activate the Libraries.
+```{r}
+options(warn = -1) # Suppress Warnings
+library(caTools)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(corrplot)
+library(cowplot)
+library(carData) # Loading Prestige dataset
+```
+
+## Load the Dataset
+
+For the sake of training we decided to use the Library carData instead of the csv. Now we split the dataset into train and test sets. But first we have a look at the dataset with the head() command (same as view() ).
+```{r}
+dataset <- (Prestige)
+head(dataset)
+#trainingset_x <- select (trainingset_x, -c(census, education)) to get rid of columns
+```
+
+# Data Understanding
+
+With the commands below we are going to explore the dataset.
+```{r}
+str(dataset) # it will return a data frame with four columns: variables, class, levels and examples
+summary(dataset) #showes the quartiles and Median, this is good for skewness
+```
+
+Skewness is the degree of distortion from symmetrical normal distribution. If the median is larger than the mean, the variable is left-skewed. If it's lower, then it's right-skewed.
+
+To calculate the skewness we use the Pearson Coefficient. So in addition to the statistical KPIs provided above, we need the standard deviation.
+
+```{r}
+sd(Prestige$education) # 2.728444
+sd(Prestige$income) # 4245.922
+sd(Prestige$women) # 31.72493
+sd(Prestige$prestige) # 17.20449
+sd(Prestige$census) # 2644.993
+```
+
+Now that we have the standard deviation for each variable, let's continue with calculate the actual Pearson Coefficient to make a more detailed statement about the skewness. In order to do so, we write a function passing the median, mean and standard deviation as a parameter.
+
+```{r}
+calculate_pearson_skewness <- function(median, mean, sd){
+
+  pearson_skewness <- ((median - mean) * 3) / sd
+  return(pearson_skewness)
+}
+
+education_pc <- calculate_pearson_skewness(median(Prestige$education), mean(Prestige$education), sd(Prestige$education)) # -0.2177496
+
+income_pc <- calculate_pearson_skewness(median(Prestige$income), mean(Prestige$income), sd(Prestige$income)) # -0.6128718
+
+women_pc <- calculate_pearson_skewness(median(Prestige$women), mean(Prestige$women), sd(Prestige$women)) # -1.454284
+
+prestige_pc <- calculate_pearson_skewness(median(Prestige$prestige), mean(Prestige$prestige), sd(Prestige$prestige)) # -0.5638065
+
+census_pc <- calculate_pearson_skewness(median(Prestige$census), mean(Prestige$census), sd(Prestige$census)) # -0.3025806
+
+
+```
+
+As interpretation of the results, we use the following table:
+
+-0.5 to 0.5: Fairly symmetrical  
+-1 to -0.5 OR 0.5 to 1: Moderately skewed  
+less than -1 OR higher than 1: Highly skewed  
+
+"education": Fairly symmetrical data  
+"income": Moderately right-skewed  
+"women": Highly right-skewed  
+"prestige": Moderately right-skewed  
+"census:" Fairly symmetrical  
+
+So what does this tell us? Let's take the variable "income" for example. We can now say for certain, that the majority of people have an income below the average! To illustrate this and prove our point, we make a very simply graph to show the distribution of income.
+
+```{r}
+ggplot(Prestige, aes(income))+ 
+  geom_histogram(binwidth=100, color="black")
+```
+
+
+```{r}
+
+anyNA(dataset) #Check if there areany missing Values
+anyDuplicated(dataset) #Check if there are duplicated rows in the dataset
+```
+There's data on a total of 102 different jobs. We can notice that the "type" variable has 4 missing values. We have to keep this in mind whilst building our regression model, as long as we want to use the type variable.
+
+
+
+# Data Visualization 
+
+
+## Corrplot
+The best and easiest way to indentify the variables that are highly correlated is using a corrplot, short for correlation plot. 
+Attention: Let's keep in mind we have two classes, namely numeric / integer and factor. 
+
+```{r}
+corrplot(cor(dataset[,-c(5:6)])) #Let's get rid of the factor 'type'
+```
+
+According to the independent Variables, we notice that income and education are highly positively correlated with prestige. When we look at the census, we see that it's negatively correlated with prestige.
+Further, there is no use for the variable "women" as it shows little to no correlation at all. The higher the correlation, the more accurate a prediction can be in linear regression. Therefore, only the highly correlating variables should be used.
+But for multiple linear regression another assumption should be fulfilled. The independent variables should have a linear independence. This means that it can be problematic if there is a strong correlation between two or more independent variables. Because then an independent variable can be predicted to a large degree from another variable.
+
+This exploration has provided us great insight into the data, but let's move on to the data preprocessing stage. 
+
+## Simple Plots
+
+Let's keep it simple and plot two variables against each other. So we can look for outliers and non-linear relationships.
+
+```{r}
+# Arrange 4 Plots in 2 rows and 2 columns
+par(mfrow=c(2,3))
+plot(dataset$education, dataset$prestige)
+plot(dataset$income, dataset$prestige)
+plot(dataset$income, log2(dataset$prestige))
+plot(dataset$census, dataset$prestige)
+plot(dataset$women, dataset$prestige)
+
+```
+
+As we can conclude from the five plots, the relationship between education and prestige shares a more linear relationship that income and prestige. The census shows us how much data was collected. Hence it makes no sense to use it in our modelling section.
+
+## More detailed ggplot
+
+```{r}
+plotEducation <- ggplot(data = dataset, aes(x = education, y = prestige, col = type)) + geom_point()
+plotIncome <- ggplot(data = dataset, aes(x = income, y = prestige, col = type)) + geom_point()
+plotCensus <- ggplot(data = dataset, aes(x = census, y = prestige, col = type)) + geom_point()
+plotWomen <- ggplot(data = dataset, aes(x = women, y = prestige, col = type)) + geom_point()
+#Show the 4 Plots in a Grid
+plot_grid(plotIncome, plotEducation, plotWomen, plotCensus, labels = "AUTO")
+```
+
+The more detailed ggplot gives us a better insight into the relationship of the "income" and "education" rather than "women" and "census". 
+
+# Data Preprocessing
+
+### Univariate analysis - Histogram
+
+As a next step we'd like to make sure that we check the variable before feeding it into to simple regression algorithm; Thus we are looking for the data distribution of "income" and "education" variables through a histogram with bins and compare it against mean and median values. 
+
+```{r}
+histIncome <- ggplot(Prestige, aes(x = income)) + geom_histogram(binwidth = 1000) +
+  geom_vline(xintercept = mean(Prestige$income), color = "indianred") +
+  geom_vline(xintercept = median(Prestige$income), color = "cornflowerblue")
+histEducation <- ggplot(Prestige, aes(x = education)) + geom_histogram(binwidth = 1) +
+  geom_vline(xintercept = mean(Prestige$education), color = "indianred") +
+  geom_vline(xintercept = median(Prestige$education), color = "cornflowerblue")
+#Show the two histogram together side by side
+plot_grid(histIncome, histEducation, labels = "AUTO")
+```
+
+The "income" variable is right skewed and the varibale "education" is not representing normal distribution (also known as Gaussian distribution).
+To transform this into a normal distribution we are going to use Log2 for the "income" variable and scale the value of the variable on its mean.
+
+```{r}
+# Comparing original income histogram against log of income histogram
+hist_income <- ggplot(Prestige, aes(x = income)) + geom_histogram(binwidth = 1000) +
+  labs(title = "Original Income") + labs(x ="Income") +
+  geom_vline(xintercept = mean(Prestige$income), color = "indianred") +
+  geom_vline(xintercept = median(Prestige$income), color = "cornflowerblue")
+hist_trnsf_income <- ggplot(Prestige, aes(x = log(income))) + geom_histogram(binwidth = 0.5) +
+  labs(title = "Transformed Income") + labs(x ="Log of Income") +
+  geom_vline(xintercept = mean(log(Prestige$income)), color = "indianred") +
+  geom_vline(xintercept = median(log(Prestige$income)), color = "cornflowerblue")
+plot_grid(hist_income, hist_trnsf_income, labels = "AUTO")
+
+
+plotlogIncome <- ggplot(data = dataset, aes(x = log(income), y = prestige, col = type)) + geom_point()
+plot_grid(plotIncome, plotlogIncome)
+
+```
+
+## Remove rows containing na's values
+
+```{r}
+dataset <- na.omit(dataset) # remove rows containing NA's values via omit function
+```
+
+
+# Data Modelling - Linear Regression to Predict Prestige
+
+Having made all the steps above, we are ready to build a linear regression model. Our approach is applying different regressors step by step and eliminating the variables that are not significant enough to improve the performance of the algorithm. 
+This section shall also show us that our findings from the Data Understanding and Data Visaualisation above of "women" and "census" variable are not sharing any relationship with "prestige" attribute. However, adding these minor attributes may give us in the final steps better accuracy, so let's find it out.
+
+### Regression Model - RAW
+```{r}
+# First Raw Regressor without the Factor variable
+lm_raw = lm(prestige ~ education + log(income) + women , data = dataset)
+summary(lm_raw) # run a summary of its results
+```
+
+By looking at our first raw concatenated algorithm, we notice that the adjusted R2 is 82% which is good. Nevertheless, the p-values from "women" is high.
+For the p-Value we can examine a linear model to be statistically significant only when the pre-determined statistical significance level of 0.05. When reflecting this at the "income" and "education"; We can see that they have very considerable p-values; Hence they are playing the most important rule in our regressor. 
+For our second step, we are going to get rid of "women" and "census" variables. Then we build a new model and again check its accuracy. 
+
+### Regression Model - Significant Variables
+```{r}
+# Fit a linear model with education and income variables
+lm_modified1 = lm(prestige ~ education + log(income), data = dataset)
+summary(lm_modified1) # run a summary of its results
+```
+Little has changed in the adjusted R2. However the can see that the intercept went down significantly. The value is now at -95. Imagine that now our linear regressor starts 95 below the coordinate system. It is hard to overlook that this model makes sense. It is hard to prove whether this model makes sense or not. To address this issue, we will create a new variable called "education.c" where we centre the value of "education" on its mean. Therefore, the mean of "education" becomes the new zero. This transformation should bring us a more meaningful interpretation of its intercept estimate. 
+
+This link showes how z transformation in R works: http://www.statistics4u.info/fundstat_germ/ee_ztransform.html
+http://rtutorialseries.blogspot.com/2012/03/r-tutorial-series-centering-variables.html
+
+
+### Center Varibles and Create Train and Test
+
+```{r}
+prstg_df = dataset # creating a new dataset copy of Prestige or other manipulations
+
+# scaling the value of education to its mean value
+set.seed(1)
+education.c = scale(prstg_df$education, center=TRUE, scale=FALSE)
+prstg_df = cbind(prstg_df, education.c)
+```
+As a next step (this could also be done in the data preprocessing part) we are splitting our prestaged dataset into Train and Test set. The SplitRatio is high at 95% so that we have around 5 testing values.
+```{r}
+# Splitting the dataset into the Training set and Test set
+# install.packages('caTools')
+library(caTools)
+set.seed(123)
+split = sample.split(prstg_df$prestige, SplitRatio = 0.95)
+training_set = subset(prstg_df, split == TRUE)
+test_set = subset(prstg_df, split == FALSE)
+
+```
+
+### Regression Model - Education Centred
+```{r}
+# Fit a linear model with centered education and income variables
+lm_modified3 = lm(prestige ~ education.c + log(income), data = training_set)
+summary(lm_modified3) # run a summary of its results
+```
+
+
+```{r}
+par(mfrow = c(2, 2))  # Split the plotting panel into a 2 x 2 grid
+plot(lm_modified3)  # Plot the income model information
+```
+
+To better analyse our model we plot residual values of our last regressor. The residuals are the difference between the actual and the predicted values. Let's take some time to refresh on what kind of properties a residual plot should have:
+
+1. They're symmetrically distributed, tending to cluster towards the middle of the plot
+2. They're gathered around the lower single digits of the y-axis (e.g., 0.5 or 1.5, not 30 or 150)
+3. In general, there aren't clear patterns
+
+From the above summary, we can conclude that residuals are ranging from  -17 to 18 and you can see them on the Q-Q plot that our data are evenly distributed. A Q-Q plot is a scatterplot which plots two sets of quantiles against one another. Q-Q plots take your sample data, sort it in ascending order, and then plot them versus quantiles calculated from a theoretical distribution. The number of quantiles is selected to match the size of your sample data.
+
+### Residual Plots
+```{r}
+# Compare Actual, Predicted and Residual values of prestige from Education model
+prstg_df_pred = as.data.frame(training_set$prestige) # Save the actual values
+prstg_df_pred$predicted <- predict(lm_modified3) # Save the predicted values
+prstg_df_pred$residuals <- residuals(lm_modified3) # Save the residual values
+head(prstg_df_pred)
+```
+```{r}
+plot(residuals(lm_modified3)) # Residual distribution of the model
+abline(a=0,b=0,col='blue')
+```
+
+Now, let's see if we can further improve the model. If you remember, above we had done scatterplot for "income" and "education" against "prestige" with "type" variable as category and you have seen that for each category the linearity is different. Let's look at that from a different perspective. But before that, let's handle the NA values in "type"variable.
+
+```{r}
+ggplot_income <- ggplot(data = training_set, aes(x = prestige, y = income, col = type)) + geom_smooth()
+ggplot_educ <- ggplot(data = training_set, aes(x = prestige, y = education, col = type)) + geom_smooth()
+plot_grid(ggplot_income, ggplot_educ, labels = "AUTO")
+```
+
+The regressor looks good but let's think about how we can improve the model?
+We are going back to the detailed ggplots where we included the types to give us nice boundaries to look at. This actually shows us that each and every type is different. So let us integrate the factors and examine whether the model has improved. 
+
+### Linear Regressor - Type Factor Included
+ 
+```{r}
+# Fit a linear model with centered education, log of income and type variables
+lm_modified4 = lm(prestige ~ education.c + log(income) + type, data = training_set)
+summary(lm_modified4) # run a summary of its results
+```
+We can notice that R2 has increased to 85% and the residuals are ranging from -13 to 17.
+
+### Linear Regressor - Adding Variables Another Way + Women
+
+Here we are just adding the variable type in another way to the regressor model. As a final step we included the attribute "women" to see if it could make our model even more accurate. Adding the "women" into the brackets gives us a improvement of around 2%.
+```{r}
+lm_modified5 = lm(prestige ~ type * (education.c + log2(income) + women) , data = training_set)
+summary(lm_modified5) # run a summary of its results
+par(mfrow = c(2, 2))
+plot(lm_modified5)
+```
+
+Our model provides us now with an accuracy of 87.5 %, so we can conclude that including the type increases the predictor, as well as the attribute "women" in our final model. In the end, we were playing around with the brackets and improved our model (increase of prediction by roughly 2.5%). 
+
+## Outlier Detection - Cooks distance
+
+An additional input after today's input from the Professor. 
+```{r}
+cooksd <- cooks.distance(lm_modified5)
+sample_size <- nrow(training_set)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")# plot cook's distance
+abline(h = 4/sample_size, col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4/sample_size, names(cooksd),""), col="red")  # add labels
+```
+
+```{r}
+# Detecting outliers in cars dataset; 
+fit<- lm(prestige ~ type * (education.c + log2(income) + women) , data = training_set)
+training_set$cooksd <- cooks.distance(fit);
+# Defining outliers based on 4/n criteria; 
+training_set$outlier <- ifelse(training_set$cooksd < 4/nrow(training_set), "keep","delete") 
+training_set_cleared <- subset(training_set, outlier=='keep')
+
+lm_modified6<- lm(prestige ~ type * (education.c + log2(income) + women) , data = training_set_cleared)
+
+summary(lm_modified6)
+```
+
+
+## Backward Elimination
+
+Here is a quick test of building a model with Backward Elimination.
+This algorithm can be summarized by five steps:
+
+1. Step: Select a significance level to stay in the model (e.g. SL= 0.05)
+2. Step: Fit the model with all possible predictors
+3. Step: Consider the predictor with the highest P-value. if P > SL, go to step 4, otherwhise go to END
+4. Step: Remove the predictor
+5. Step: Fit the model without this variable --> goto Step 3
+
+
+```{r}
+#Function backwarElimination
+backwardElimination <- function(x, sl) {
+    numVars = length(x)
+    for (i in c(1:numVars)){
+      regressorBE = lm(formula = prestige ~ ., data = x)
+      maxVar = max(coef(summary(regressorBE))[c(2:numVars), "Pr(>|t|)"])
+      if (maxVar > sl){
+        j = which(coef(summary(regressorBE))[c(2:numVars), "Pr(>|t|)"] == maxVar)
+        x = x[, -j]
+      }
+      numVars = numVars - 1
+    }
+    return(summary(regressorBE))
+  }
+#Call function + declate variables
+  SL = 0.001
+  x <- select (training_set_cleared,-c(education, census, type, outlier, cooksd))
+  backwardElimination(x, SL)
+```
+With the Backward Elimination approach we ended up that there are just one, or two possible predictors, namely the income and the centered education. However we are not sure if this automatic function worked entierly corretly. 
+
+
+
+# Evaluation
+
+This is our final section where we feed the algorithm with our Test set and perform K-Fold.
+
+
+## K-Fold Cross Validation
+The problem of the validation set approach is that the test error estimation depends on the selection of test sets. Thus, the model has low robustness. The test set might contain outliers which influence the result.
+
+In order to reach a higher robustness, we use the k-fold cross validation method which evaluates the model performance on different subset of the training data and then calculate the average prediction error rate. The algorithm is as follow:
+
+1. Randomly split the data set into k-subsets (or k-fold) (for example 5 subsets)
+2. Reserve one subset and train the model on all other subsets
+3. Test the model on the reserved subset and record the prediction error
+4. Repeat this process until each of the k subsets has served as the test set.
+5. Compute the average of the k recorded errors. This is called the cross-validation error serving as the performance metric for the model.
+
+We set k = 5. In practice, one typically performs k-fold cross-validation using k = 5 or k = 10, as these values have been shown empirically to yield test error rate estimates that suffer neither from excessively high bias nor from very high variance.
+
+In R it looks like this. We took the lm_modified3 model which has the most significance.
+
+```{r}
+model_cv <- train(prestige ~ education.c + log(income), training_set, 
+                  method = "lm",
+                  trControl = trainControl(
+                    method = "cv", number = 5,
+                    verboseIter = TRUE
+                  ))
+```
+```{r}
+print(model_cv)
+```
+```{r}
+summary(model_cv)
+```
+[Here](www.sthda.com/english/articles/38-regression-model-validation/157-cross-validation-essentials-in-r/) K-Fold Cross Validation is explained in more detail.
+
+We see that not much has changed in the result, but it gives us confirmation that the model is good fitted.
+
+
+
+## The Test Set
+```{r}
+head(test_set)
+```
+
+## Prediction Regressor
+In this section we are only going to test the algorithm against our Original Algorithm, Algorithm with type and the final algorithm with the strongest prediction. In y_pred_interval we let the prediction and the 95% confidence interval be displayed. This means we are 95% confident the predicted units will fall between "lwr" und "upr".
+
+## Linear Regressor - log2(income) + education.c
+```{r}
+y_pred = predict(lm_modified3, newdata =test_set)
+y_pred
+y_pred_interval <-predict(lm_modified3, newdata =test_set, interval = "prediction", level = 0.95)
+y_pred_interval
+```
+
+
+## Linear Regressor -  education.c + log(income) + type
+```{r}
+y_pred = predict(lm_modified4, newdata =test_set)
+y_pred
+y_pred_interval <-predict(lm_modified4, newdata =test_set, interval = "prediction", level = 0.95)
+y_pred_interval
+```
+
+
+
+## Linear Regressor -  type * (education.c + log(income) + women)
+```{r}
+y_pred = predict(lm_modified5, newdata =test_set)
+y_pred
+y_pred_interval <-predict(lm_modified5, newdata =test_set, interval = "prediction", level = 0.95)
+y_pred_interval
+```
+
+```{r}
+# Drop the columns of the dataframe X
+library(dplyr)
+x <- select (training_set,-c(education, census, cooksd, outlier))
+xlog <- x
+xlog[, 1] <- log2(x[,1])
+```
+
+## Test Dataset with Random Forest
+```{r}
+library(randomForest)
+set.seed(123)
+regressorRF = randomForest(xlog[,-3],
+                          y = xlog$prestige,
+                          ntree = 175)
+print(regressorRF)
+#attributes(regressorRF)
+importance(regressorRF) 
+#regressorRF$rsq[25]
+#regressorRF$rsq[100]
+regressorRF$rsq[175] #Accuracy
+```
+MSS is here too big, the model RF does not fit well but we can see again the importance of the attributes in another way.
+
+```{r}
+# Predicting a new result with Random Forest Regression
+y_pred = predict(regressorRF, newdata =test_set)
+y_pred
+```
+
+
+# Conclusion
+
+With our multivariate model, we were able to improve R2 even further and also lowered the boundaries of the residuals of the sum of squared errors of our original log(income) and education.c model. We suggest the combination of preprocessed variables as well as adding the factor type into it. However, the added attribute "women" showed little increase but was added anyway for safety's sake. 
+
+If we had more time, it would be interesting to find out in which types the predictor shows most robust accuracy and how an entirely other algorithm performs, but that might be a task for the future.
+
